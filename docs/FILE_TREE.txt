@@ -1,4 +1,4 @@
-flybrain-robot-bridge/
+flybrain-track-follower/
   .github/ISSUE_TEMPLATE/bug_report.md
   .github/ISSUE_TEMPLATE/feature_request.md
   .github/PULL_REQUEST_TEMPLATE.md
@@ -6,23 +6,30 @@ flybrain-robot-bridge/
   .gitignore
   CONTRIBUTING.md
   LICENSE
+  NOTICE
   README.md
   assets/architecture.svg
   assets/demo-placeholder.svg
   assets/hero.svg
   assets/mock-demo.gif
   assets/mock-demo.png
+  assets/track-demo.gif
+  assets/track-demo.png
   config.example.yaml
   docs/ARCHITECTURE.md
   docs/FILE_TREE.txt
   docs/HARDWARE.md
   docs/MALECNS_INTEGRATION.md
+  docs/TRACK_FOLLOWING.md
   docs/VALIDATION.md
   examples/render_demo.py
+  examples/render_track_demo.py
   examples/run_mock.py
   firmware/atom_matrix/README.md
   firmware/atom_matrix/atom_matrix_robot.ino
   pyproject.toml
+  scripts/grating_test.py
+  scripts/open_loop_test.py
   src/flybrain_robot/__init__.py
   src/flybrain_robot/brain/__init__.py
   src/flybrain_robot/brain/base.py
@@ -34,5 +41,20 @@ flybrain-robot-bridge/
   src/flybrain_robot/motor_decoder.py
   src/flybrain_robot/protocol.py
   src/flybrain_robot/telemetry.py
+  src/flybrain_robot/track/__init__.py
+  src/flybrain_robot/track/brains.py
+  src/flybrain_robot/track/connectome/__init__.py
+  src/flybrain_robot/track/connectome/csr.py
+  src/flybrain_robot/track/connectome/cursor.py
+  src/flybrain_robot/track/connectome/defaults.py
+  src/flybrain_robot/track/connectome/engine.py
+  src/flybrain_robot/track/connectome/retina.py
+  src/flybrain_robot/track/connectome/retinotopy.py
+  src/flybrain_robot/track/connectome/schema.py
+  src/flybrain_robot/track/metrics.py
+  src/flybrain_robot/track/ribbon.py
+  src/flybrain_robot/track/sim.py
+  src/flybrain_robot/track/steer.py
   src/flybrain_robot/vision.py
   tests/test_core.py
+  tests/test_track.py

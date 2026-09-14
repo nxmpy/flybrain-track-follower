@@ -4,6 +4,9 @@ from pathlib import Path
 
 import yaml
 
+BACKENDS = ("mock", "malecns", "optomotor-track", "connectome-track")
+TRACK_BACKENDS = ("optomotor-track", "connectome-track")
+
 
 @dataclass
 class Config:
@@ -23,6 +26,19 @@ class Config:
     invert_right: bool = False
     dataset_path: str | None = None
     logging_level: str = "INFO"
+    output: str = "differential"
+    track_polarity: str = "light"
+    track_roi: float = 0.6
+    track_substeps: int = 4
+    track_anchor: float = 1.0
+    track_kp: float = 0.9
+    track_kd: float = 0.3
+    track_base_speed: float = 0.5
+    track_turn_gain: float = 0.5
+    track_min_confidence: float = 0.25
+    track_lost_frames: int = 15
+    track_connectome_path: str | None = None
+    track_wiring: str = "real"
 
     def __post_init__(self):
         bounds = {
@@ -31,6 +47,15 @@ class Config:
             "dead_zone": (0, 100),
             "looming_threshold": (0.001, 1),
             "watchdog_timeout": (0.01, 0.5),
+            "track_roi": (0.1, 1),
+            "track_substeps": (1, 32),
+            "track_anchor": (0, 1),
+            "track_kp": (0, 10),
+            "track_kd": (0, 10),
+            "track_base_speed": (0, 1),
+            "track_turn_gain": (0, 1),
+            "track_min_confidence": (0, 1),
+            "track_lost_frames": (1, 300),
         }
         for name, (low, high) in bounds.items():
             value = getattr(self, name)
@@ -46,8 +71,17 @@ class Config:
         for name in ("invert_left", "invert_right"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
-        if self.backend not in ("mock", "malecns"):
+        for name in ("track_substeps", "track_lost_frames"):
+            if type(getattr(self, name)) is not int:
+                raise ValueError(f"{name} must be an integer")
+        if self.backend not in BACKENDS:
             raise ValueError("Unknown backend")
+        if self.output not in ("differential", "track"):
+            raise ValueError("output must be differential or track")
+        if self.track_polarity not in ("light", "dark"):
+            raise ValueError("track_polarity must be light or dark")
+        if self.track_wiring not in ("real", "shuffled", "random"):
+            raise ValueError("track_wiring must be real, shuffled or random")
 
 
 def load_config(path=None):

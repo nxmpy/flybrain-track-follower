@@ -32,6 +32,14 @@ def validate(packet):
             values = packet.get(key)
             if not isinstance(values, list) or len(values) != 3 or not all(map(number, values)):
                 raise PacketError("Invalid IMU vector")
+    elif kind == "track_command":
+        keys = ("forward", "yaw_rate")
+        if type(packet.get("emergency_stop")) is not bool:
+            raise PacketError("Missing boolean emergency_stop")
+        for key, (low, high) in (("lateral", (-1, 1)), ("confidence", (0, 1))):
+            value = packet.get(key)
+            if not number(value) or not low <= value <= high:
+                raise PacketError(f"Invalid {key}")
     else:
         raise PacketError("Unknown message type")
     for key in keys:

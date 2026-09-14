@@ -1,0 +1,14 @@
+flybrain-track-follower
+=======================
+
+Fork of flybrain-robot-bridge (https://github.com/Frankweb33/flybrain-robot-bridge),
+MIT License, Copyright (c) 2026 Himas1211. See LICENSE.
+
+src/flybrain_robot/track/connectome/ contains code adapted from the beedictor
+research project (connectome engine, CSR controls, retinotopy, retina encoder and
+T4/T5 cursor readout), included by this fork's owner. Each adapted file names
+its original path in a header comment. The colour gain constant (white = 1.398, Rh1) was computed there from the
+Govardovskii et al. (2000) visual pigment template.
+
+Connectome data is not distributed. Users of the connectome backend must obtain
+FlyWire (FAFB) and Janelia MaleCNS data under their respective terms.

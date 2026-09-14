@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import math
 import time
 
 import cv2
@@ -9,35 +10,57 @@ import yaml
 
 from .brain.malecns import MaleCNSBackend
 from .brain.mock import MockBrain
-from .config import load_config
+from .config import BACKENDS, TRACK_BACKENDS, load_config
 from .controller import UDPBridge
 from .motor_decoder import MotorDecoder
 from .protocol import command
-from .telemetry import synthetic_telemetry
+from .telemetry import Telemetry, synthetic_telemetry
 from .vision import VisionEncoder, synthetic_frame
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=["mock", "malecns"])
+    parser.add_argument("--backend", choices=BACKENDS)
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int)
     source.add_argument("--video")
     source.add_argument("--synthetic", action="store_true")
+    source.add_argument(
+        "--synthetic-track",
+        action="store_true",
+        help="Closed-loop simulated vehicle on a drawn track (track backends only)",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--send", action="store_true", help="Enable physical UDP motor commands")
+    parser.add_argument("--output", choices=["differential", "track"])
+    parser.add_argument("--track-kind", choices=["curvy", "sine", "straight"], default="curvy")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--wiring", choices=["real", "shuffled", "random"])
     parser.add_argument("--config")
     parser.add_argument("--steps", type=int, default=300, help="Finite frame count (default: 300)")
     args = parser.parse_args(argv)
     if args.steps < 1:
         parser.error("--steps must be positive")
-    bridge, capture, decoder, sequence = None, None, None, 0
+    bridge, capture, decoder, sequence, output = None, None, None, 0, "differential"
     try:
         cfg = load_config(args.config)
         logging.basicConfig(level=cfg.logging_level)
         backend = args.backend or cfg.backend
-        brain = MockBrain() if backend == "mock" else MaleCNSBackend(cfg.dataset_path)
+        output = args.output or cfg.output
+        if args.wiring:
+            cfg.track_wiring = args.wiring
+        is_track = backend in TRACK_BACKENDS
+        if (args.synthetic_track or output == "track") and not is_track:
+            raise ValueError("--synthetic-track and track output need a track backend")
+        if is_track:
+            from .track import build_track_brain
+
+            brain = build_track_brain(cfg, backend)
+            encoder = brain.encoder
+        else:
+            brain = MockBrain() if backend == "mock" else MaleCNSBackend(cfg.dataset_path)
+            encoder = VisionEncoder()
         decoder = MotorDecoder(
             **{
                 name: getattr(cfg, name)
@@ -52,51 +75,113 @@ def main(argv=None):
                 )
             }
         )
-        encoder = VisionEncoder()
+        world, trace, omega = None, None, 0.0
+        simulated = args.synthetic or args.synthetic_track
         video = args.video or (cfg.video if args.camera is None else None)
-        origin = (
-            "synthetic"
-            if args.synthetic
-            else (video if video else (args.camera if args.camera is not None else cfg.camera))
-        )
-        if not args.synthetic:
+        if args.synthetic_track:
+            from .track.sim import Trace, TrackWorld, make_track
+
+            origin = f"synthetic-track:{args.track_kind}:{args.seed}"
+            world = TrackWorld(
+                make_track(args.track_kind, seed=args.seed, polarity=cfg.track_polarity)
+            )
+            trace = Trace()
+        elif args.synthetic:
+            origin = "synthetic"
+        else:
+            origin = video if video else (args.camera if args.camera is not None else cfg.camera)
             capture = cv2.VideoCapture(origin)
             if not capture.isOpened():
                 raise ValueError(f"Cannot open image source: {origin}")
         if args.send:
             bridge = UDPBridge(cfg)
-        print(f"source={origin} backend={backend} UDP={'enabled' if bridge else 'off (dry-run)'}")
+        print(
+            f"source={origin} backend={backend} output={output} "
+            f"UDP={'enabled' if bridge else 'off (dry-run)'}"
+        )
         previous = time.monotonic()
         for index in range(args.steps):
             started = time.monotonic()
-            if capture is None:
+            if world is not None:
+                frame = world.camera()
+            elif capture is None:
                 frame = synthetic_frame(index)
             else:
                 ok, frame = capture.read()
                 if not ok:
                     break
             sensory = encoder.encode(frame)
-            telemetry = bridge.receive() if bridge else synthetic_telemetry(index / 30)
+            if bridge:
+                telemetry = bridge.receive()
+            elif world is not None:
+                telemetry = Telemetry(gyro=(0.0, 0.0, math.degrees(omega)))
+            else:
+                telemetry = synthetic_telemetry(index / 30)
             now = time.monotonic()
-            dt = 1 / 30 if args.synthetic else max(0.001, min(now - previous, 0.5))
+            dt = 1 / 30 if simulated else max(0.001, min(now - previous, 0.5))
             previous = now
             activity = brain.step(sensory, telemetry, dt)
-            stopped = bridge is not None and not bridge.fresh()
+            lost = is_track and brain.controller.command.lost
+            stopped = (bridge is not None and not bridge.fresh()) or lost
             left, right = decoder.update(activity, emergency_stop=stopped)
             sequence += 1
             if bridge:
-                bridge.send(command(sequence, left, right, stopped))
+                if output == "track":
+                    from .track.steer import command_from_steer
+
+                    packet = command_from_steer(
+                        sequence, brain.controller.command, cfg.max_speed, stopped
+                    )
+                else:
+                    packet = command(sequence, left, right, stopped)
+                bridge.send(packet)
+            if world is not None:
+                _, omega = world.drive(left, right, dt)
+                trace.true_lateral.append(world.lateral_error())
+                trace.measured_lateral.append(encoder.observation.lateral)
+                trace.brain_lateral.append(brain.estimate.lateral)
+                trace.brain_velocity.append(brain.estimate.velocity)
+                trace.left.append(left)
+                trace.right.append(right)
+                trace.progress.append(world.progress)
+                trace.lost += int(lost)
             if index % 10 == 0:
                 status = (
                     "fresh" if bridge and bridge.fresh() else ("stale" if bridge else "synthetic")
                 )
-                print(
-                    f"frame={index:04d} Hz={1 / dt:.1f} motion={sensory.left_motion:.2f}/"
-                    f"{sensory.right_motion:.2f} looming={sensory.looming:.2f} IMU={status} "
-                    f"motor={activity.left:.2f}/{activity.right:.2f} "
-                    f"command={left:+d}/{right:+d} watchdog={'STOP' if stopped else 'ready'}"
-                )
-            time.sleep(max(0, 1 / 30 - (time.monotonic() - started)))
+                if is_track:
+                    obs, steer = encoder.observation, brain.controller.command
+                    extra = (
+                        f" error={trace.true_lateral[-1] * 1000:+.0f}mm "
+                        f"progress={world.progress:.0%}"
+                        if world is not None
+                        else ""
+                    )
+                    print(
+                        f"frame={index:04d} Hz={1 / dt:.1f} path={obs.lateral:+.2f} "
+                        f"brain={brain.estimate.lateral:+.2f} confidence={obs.confidence:.2f} "
+                        f"turn={steer.turn:+.2f} command={left:+d}/{right:+d} "
+                        f"{'LOST' if lost else ''}{extra} watchdog={'STOP' if stopped else 'ready'}"
+                    )
+                else:
+                    print(
+                        f"frame={index:04d} Hz={1 / dt:.1f} motion={sensory.left_motion:.2f}/"
+                        f"{sensory.right_motion:.2f} looming={sensory.looming:.2f} IMU={status} "
+                        f"motor={activity.left:.2f}/{activity.right:.2f} "
+                        f"command={left:+d}/{right:+d} watchdog={'STOP' if stopped else 'ready'}"
+                    )
+            if world is not None:
+                if world.progress >= 0.99:
+                    break
+            else:
+                time.sleep(max(0, 1 / 30 - (time.monotonic() - started)))
+        if trace is not None:
+            from .track.metrics import summarise
+
+            summary = summarise(trace)
+            print("summary " + " ".join(
+                f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in summary.items()
+            ))
     except KeyboardInterrupt:
         print("Stopped by user.")
     except (ValueError, OSError, NotImplementedError, cv2.error, yaml.YAMLError) as exc:
@@ -106,7 +191,12 @@ def main(argv=None):
             decoder.stop()
         if bridge:
             try:
-                bridge.send(command(sequence + 1, emergency_stop=True))
+                if output == "track":
+                    from .track.steer import track_command
+
+                    bridge.send(track_command(sequence + 1, emergency_stop=True))
+                else:
+                    bridge.send(command(sequence + 1, emergency_stop=True))
             except OSError:
                 logging.warning("Final stop datagram failed; robot watchdog must stop motors")
             finally:

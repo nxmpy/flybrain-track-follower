@@ -14,3 +14,17 @@ invert_left: false
 invert_right: false
 dataset_path: null
 logging_level: INFO
+# Path / track following (backends: optomotor-track, connectome-track)
+output: differential          # differential = left/right wheels, track = forward/yaw_rate datagram
+track_polarity: light         # light = bright line on dark ground, dark = black tape on light floor
+track_roi: 0.6                # bottom fraction of the image searched for the path
+track_substeps: 4             # ribbon frames per camera frame
+track_anchor: 1.0             # cursor placement on the measured path per frame (0 = brain only)
+track_kp: 0.9                 # steering from lateral estimate
+track_kd: 0.3                 # steering from the insect motion signal (0 disables it)
+track_base_speed: 0.5
+track_turn_gain: 0.5
+track_min_confidence: 0.25
+track_lost_frames: 15         # frames without a path before emergency stop
+track_connectome_path: null   # e.g. ../bee/data/processed/male_connectome.npz
+track_wiring: real            # real | shuffled | random (research control arms)

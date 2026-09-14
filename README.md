@@ -1,184 +1,218 @@
 <div align="center">
 
-<img src="assets/hero.svg" alt="FlyBrain Robot Bridge — from visual signals to physical motion" width="100%">
+# FlyBrain Track Follower
 
-# FlyBrain Robot Bridge
-
-**Connect a Drosophila connectome simulation to a physical robot.**
+**Camera path following for robots and drones, built on an insect-inspired robot bridge.**
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-79cce8?style=flat-square)
-[![Tests](https://github.com/Himas1211/flybrain-robot-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/Himas1211/flybrain-robot-bridge/actions/workflows/test.yml)
+[![Tests](https://github.com/nxmpy/flybrain-track-follower/actions/workflows/test.yml/badge.svg)](https://github.com/nxmpy/flybrain-track-follower/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-60dfb3?style=flat-square)](LICENSE)
 ![Stage: proof of concept](https://img.shields.io/badge/Stage-proof_of_concept-b4bfd0?style=flat-square)
 
-[Quick start](#quick-start) · [Demo](#mock-demo) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Quick start](#quick-start) · [How it follows](#how-it-follows) · [Results](#measured-results) · [Drones](#drones-and-other-vehicles) · [Upstream bridge](#upstream-bridge)
 
 </div>
 
-An experimental interface between a camera, a neural backend and a physical robot.
-Visual motion and IMU signals feed a small demonstration model; a decoder turns
-its activity into commands for the left and right sides of a robot.
+A fork of [flybrain-robot-bridge](https://github.com/Frankweb33/flybrain-robot-bridge)
+that makes robots and drones follow a path: a line, tape track, lane edge or
+any bright (or dark) stripe the camera can see.
 
-**Try it in 30 seconds.** The synthetic demo runs locally without a robot, camera,
-network connection or connectome download.
+![Simulated track run: camera, ribbon stimulus, lateral error and wheel commands](assets/track-demo.gif)
 
-> [!NOTE]
-> This repository does not contain a biological brain or a complete emulation of consciousness. The default backend is a small demonstrator. MaleCNS support is an experimental integration target.
+*Generated from the actual encoder, insect motion model, controller and motor
+decoder in a closed-loop simulation. Not a physical robot recording.*
 
-## What it does
+## Where the idea came from
 
-- Runs locally with synthetic frames, a webcam or a video file.
-- Estimates motion in two image halves and approximate center-relative expansion.
-- Updates eight hand-designed leaky activity groups using vision and IMU features.
-- Limits, smooths and optionally inverts two motor commands; looming triggers reverse motion.
-- Validates JSON/UDP messages and ignores malformed or out-of-order telemetry.
-- Defaults to dry-run. Physical command transmission requires `--send`.
+The [beedictor research](docs/TRACK_FOLLOWING.md#the-research-behind-it) showed a
+Drosophila connectome a price chart drawn as a white ribbon on black. Its cursor
+sat on the line (rho 0.84-0.91), always one step behind, and could not predict
+where the line went next. **A follower, not a predictor.** Price forecasting needs
+prediction; path following only needs to stay on the line. This project takes the
+follower and gives it a track.
 
-## Architecture
+Checking *why* it followed turned out to matter (details in
+[docs/TRACK_FOLLOWING.md](docs/TRACK_FOLLOWING.md)):
 
-![Signal flow and IMU feedback](assets/architecture.svg)
+- Each observation placed the cursor on the last price before the brain ran.
+  That placement carried the following: rho(start, final) = 0.93, while the brain's
+  own move against the real price move was rho ≈ 0.005.
+- Under the research simulator the connectome's T4/T5 motion cells fire at the same
+  rate for up and down motion (`scripts/grating_test.py`).
 
-`Camera → VisionEncoder → BrainBackend → MotorDecoder → UDP → robot`
-
-`Robot IMU → UDP telemetry → BrainBackend`
-
-See [architecture and protocol](docs/ARCHITECTURE.md). The eight groups are
-`left_motion`, `right_motion`, `looming`, `balance_left`, `balance_right`,
-`left_motor`, `right_motor`, and `escape`. These names describe engineering signals,
-not identified biological neurons. The model has a small forward-motion bias.
+So here, as in the research, the **follower is the placement on the line**,
+done by reading the path out of each camera frame. A Hassenstein-Reichardt motion
+detector (the textbook model of the fly's T4/T5 computation) runs on the same
+stimulus and adds its motion signal. The research connectome is included as an
+experimental backend with its control arms, so it can be retested honestly.
 
 ## Quick start
 
-Requires Python 3.11+.
+Requires Python 3.11+. No robot, camera, network or connectome download needed.
 
 ```bash
-git clone https://github.com/Himas1211/flybrain-robot-bridge.git
-cd flybrain-robot-bridge
-python3.11 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/nxmpy/flybrain-track-follower.git
+cd flybrain-track-follower
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python -m flybrain_robot.main --backend mock --synthetic
+python -m flybrain_robot.main --backend optomotor-track --synthetic-track --steps 1500
 ```
 
-The default run lasts 300 frames (about 10 seconds) and uses no network or camera.
-
-## Mock demo
-
-![Synthetic camera, mock activity and decoded commands](assets/mock-demo.gif)
-
-*Generated from the actual synthetic encoder, mock backend and motor decoder.
-This is a visualization of software output, not a physical robot recording.*
+This drives a simulated differential-drive robot along a random 8 m curvy track
+and prints a summary such as `rms_error_m=0.0145 completion=0.99 lost_frames=0`.
 
 ```bash
-python -m flybrain_robot.main --synthetic --dry-run --steps 90
-python -m flybrain_robot.main --backend mock --camera 0 --dry-run
-python -m flybrain_robot.main --backend mock --video /path/to/your/video.mp4 --dry-run
+# other simulated courses
+python -m flybrain_robot.main --backend optomotor-track --synthetic-track --track-kind sine --steps 2000
+# a webcam or a recorded video of a line track (dry-run: nothing is sent)
+python -m flybrain_robot.main --backend optomotor-track --camera 0
+python -m flybrain_robot.main --backend optomotor-track --video line_track.mp4
+# black tape on a light floor
+printf 'track_polarity: dark\n' > config.yaml
 ```
 
-Bring your own video for the video-file mode. Terminal output includes
-motion, looming, IMU freshness, motor activity, commands and watchdog state.
-Synthetic mode uses deterministic frames, fixed simulation time steps and a
-synthetic IMU oscillation. It is a signal-flow demo, not a robot physics simulation.
-The printed synthetic Hz is the simulation rate, not a performance benchmark.
+## How it follows
 
-## Connecting a physical robot
+`Camera → PathRibbonEncoder → track brain → TrackController → MotorDecoder → UDP`
+
+1. **Find the path.** The lower part of the image is scanned row by row for the
+   brightest (or darkest) stripe, giving the path's lateral position at several
+   look-ahead distances and a confidence.
+2. **Draw it as the research chart.** Those positions become a 160x320 white ribbon
+   on black. Near rows are on the left, the look-ahead is on the right, and path
+   to the right of the vehicle is drawn up. Between camera frames the ribbon moves
+   in sub-steps so motion detectors see continuous movement.
+3. **Follow.** Each frame the cursor is placed on the measured path
+   (`track_anchor`), then the motion model moves it by what it sees.
+4. **Steer.** `turn = kp * lateral + kd * motion`. It is sent as left/right wheel
+   activity through the upstream decoder (limits, smoothing, watchdog) or as a
+   `track_command` datagram. If the path is lost for `track_lost_frames` frames,
+   the vehicle gets an emergency stop.
+
+Backends:
+
+| backend | brain | needs | rate |
+|---|---|---|---|
+| `optomotor-track` | Hassenstein-Reichardt correlator array | NumPy | ~100-150 Hz |
+| `connectome-track` | beedictor connectome simulator + T4/T5 cursor (**experimental**) | `pip install -e ".[connectome]"`, a prepared `.npz` | 6-12 Hz |
+
+## Measured results
+
+Simulation, defaults unless stated. Reproduce with the commands in
+[docs/TRACK_FOLLOWING.md](docs/TRACK_FOLLOWING.md#reproducing-the-numbers).
+
+**Open loop: does the brain's own motion signal track path motion?**
+(`scripts/open_loop_test.py`, anchor off)
+
+| brain | Spearman rho | rate |
+|---|---|---|
+| Reichardt motion model | **0.78** | 146 Hz |
+| male connectome, real wiring | 0.08 | 12 Hz |
+| male connectome, random wiring | 0.03 | 6 Hz |
+
+**Closed loop: 8 m curvy tracks (3 seeds) and a sine course, all completed**
+
+| setting | RMS lateral error |
+|---|---|
+| placement only (`track_kd: 0`) | 7.8-21 mm |
+| placement + Reichardt motion term (default `kd 0.3`) | 7.8-24 mm |
+| placement + Reichardt, heavy motion weight (`kd 1.0`) | 12-30 mm |
+
+**Closed loop: connectome arms on the same curvy track (450 frames)**
+
+| setting | RMS error | max error |
+|---|---|---|
+| placement only | 4 mm | 7 mm |
+| placement + real connectome | 35 mm | 108 mm |
+| placement + random-wired connectome | 5 mm | 11 mm |
+| real connectome without placement | lost the track | |
+
+In other words, the insect motion model senses path motion well, but in this
+simulator it does not improve steering over placement alone. The connectome, as
+simulated, adds error. These are simulation numbers only.
+
+## Drones and other vehicles
+
+Ground robots use the upstream `motor_command` (left/right). Anything else, such
+as a drone companion computer or a steering servo, can use `--output track`:
+
+```json
+{"type":"track_command","sequence":42,"forward":14.2,"yaw_rate":-6.1,"lateral":-0.18,"confidence":0.94,"emergency_stop":false}
+```
+
+`forward` and `yaw_rate` use the same -100..100 scale as `max_speed`, and
+`yaw_rate > 0` means turn right. `lateral` is the path offset (-1 left .. +1
+right), and `confidence` is the fraction of look-ahead rows where the path was
+found. A drone should map these to body-frame velocity and yaw-rate setpoints in
+its own autopilot and hold position when `emergency_stop` is true. No MAVLink
+bridge is included; see [docs/TRACK_FOLLOWING.md](docs/TRACK_FOLLOWING.md#drones).
 
 ```bash
-cp config.example.yaml config.yaml
-# Set robot_ip, pc_port, robot_port and calibrated motor limits.
+cp config.example.yaml config.yaml   # set robot_ip/ports, backend: optomotor-track, output: track
 python -m flybrain_robot.main --camera 0 --config config.yaml --send
 ```
 
-The [firmware scaffold](firmware/atom_matrix/README.md) requires board-specific
-servo and IMU hooks before it can move a robot. It is intentionally disarmed until
-those hooks are implemented. No hardware test has been performed.
+## Upstream bridge
 
-The PC sends zero commands while telemetry is absent or older than 500 ms.
-The receiver must independently stop motors after 500 ms without a fresh command.
-Ctrl+C and normal exit send a best-effort stop packet. UDP delivery is not guaranteed.
+Everything from flybrain-robot-bridge still works unchanged: the mock backend,
+optical-flow encoder, IMU telemetry, UDP protocol and watchdog, and the firmware
+scaffold.
 
-## MaleCNS integration
+```bash
+python -m flybrain_robot.main --backend mock --synthetic
+```
 
-`MaleCNSBackend` checks the configured dataset path and then exits with
-`Not implemented yet`. No graph is loaded and no simulated MaleCNS result is fabricated.
-See [integration notes](docs/MALECNS_INTEGRATION.md) for the proposed extension points.
+See [architecture and protocol](docs/ARCHITECTURE.md),
+[hardware notes](docs/HARDWARE.md) and the
+[firmware scaffold](firmware/atom_matrix/README.md). The firmware is disarmed
+and untested on hardware.
 
 ## Repository structure
 
 ```text
-assets/                       Cover, architecture diagram and recorded mock output
-src/flybrain_robot/            CLI, vision, protocol, decoder, configuration
-src/flybrain_robot/brain/      Backend interface, working mock, MaleCNS stub
-firmware/atom_matrix/          Disarmed ESP32 integration scaffold
-examples/                     Synthetic demo and GIF rendering script
-tests/                        Protocol, model, decoder, watchdog and CLI checks
-docs/                         Architecture, hardware and integration notes
-.github/workflows/test.yml    Ruff, pytest and synthetic smoke run
+src/flybrain_robot/track/            Path encoder, track brains, controller, simulator, metrics
+src/flybrain_robot/track/connectome/ Connectome engine, retina and T4/T5 cursor from beedictor
+src/flybrain_robot/                  Upstream CLI, vision, protocol, decoder, configuration
+scripts/                             Open-loop follow test and grating direction test
+examples/                            Demo GIF renderers
+tests/                               Upstream checks plus track tests
+docs/TRACK_FOLLOWING.md              Pipeline, research audit, drone packet, reproduction
 ```
 
-## Current limitations
+## Limitations
 
-This is an early proof of concept. The model is hand-designed and does not use connectome data.
-Motion signals are magnitudes in each image half, not a biological directional
-vision model. Looming is a center-relative optical-flow heuristic and is sensitive
-to camera motion, lighting and frame rate. It is not collision avoidance.
-IMU feedback currently uses gyro yaw only. There is no gait generator, physical
-simulation, interactive dashboard or recorded robot demonstration. UDP has no
-authentication, reliability or replay protection across process restarts.
-Firmware is a scaffold and has not been compiled or tested on a board.
-
-## Roadmap
-
-- [x] Working mock neural backend
-- [x] OpenCV optical-flow encoder (synthetic validation; webcam hardware untested)
-- [x] UDP bridge implementation (physical link untested)
-- [ ] Complete and test Atom Matrix firmware on hardware
-- [ ] Live motor activity visualization
-- [ ] Partial MaleCNS graph loading
-- [ ] Map visual populations to motor populations
-- [ ] GPU simulation backend
-- [ ] Record a physical Strandbeest robot demo
-
-## Scientific sources
-
-- [Male CNS Connectome — Janelia](https://www.janelia.org/project-team/flyem/male-cns-connectome)
-- [Google Research overview](https://research.google/blog/a-connectomics-milestone-mapping-the-complete-male-fruit-fly-brain/)
-
-## Inspiration and attribution
-
-An independent experimental bridge implementation inspired by open MaleCNS
-research and community experiments with digital Drosophila models. The connectome
-and scientific models belong to their original researchers; this project claims
-no authorship of their discoveries. No third-party project source code or datasets
-are bundled. Related community projects for further reading:
-
-- [nftechie/doomfly](https://github.com/nftechie/doomfly)
-- [ornata/fly](https://github.com/ornata/fly)
-- [eonsystemspbc/fly-brain](https://github.com/eonsystemspbc/fly-brain)
-- [philshiu/Drosophila_brain_model](https://github.com/philshiu/Drosophila_brain_model)
-- [DenisSergeevitch/desktop-fly](https://github.com/DenisSergeevitch/desktop-fly)
-
-Check each project's license before reusing any material. Dependency licenses and
-future dataset terms remain separate from this project's MIT license.
+- Only simulated tracks and a synthetic video were tested. There has been no
+  physical robot or drone run.
+- The path finder picks one stripe per row, preferring the one nearest its
+  previous estimate. Junctions, gaps, glare, shadows and a second line nearby
+  are not handled robustly.
+- The simulated camera is an ideal top-down patch with no perspective, blur,
+  latency or lighting change.
+- The connectome backend is too slow for real-time control on one CPU core and
+  does not track in the current engine.
+- UDP has no authentication or delivery guarantee.
 
 ## Safety
 
-Start with dry-run, then calibrate with the robot lifted off the ground. Use an
-independent motor power cutoff and a receiver watchdog. An optical-flow heuristic
-cannot protect people or equipment. Use a trusted isolated network; firmware
-integration needs a hardware review before motion is enabled.
+Start in dry-run, then test with wheels lifted or propellers removed. Keep an
+independent motor or power cutoff and a receiver-side watchdog. A path follower
+does not detect obstacles, people or drop-offs. For drones, fly only in a
+controlled area with the autopilot's own failsafes enabled.
 
 ## Development
 
 ```bash
 ruff check .
-pytest -q
-python -m flybrain_robot.main --synthetic --dry-run --steps 20
+pytest -q                      # connectome test runs if ../bee/data/processed/*.npz exists
+python scripts/open_loop_test.py
+pip install -e ".[demo]" && python examples/render_track_demo.py
 ```
 
-Rebuild the README animation with `pip install -e ".[demo]"` followed by
-`python examples/render_demo.py`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+## License and attribution
 
-## License
-
-[MIT](LICENSE). Scientific datasets and dependencies retain their own license terms.
+[MIT](LICENSE). Upstream bridge © 2026 Himas1211. The connectome engine, retina
+mapping and cursor readout are adapted from the beedictor research project; see
+[NOTICE](NOTICE). Connectome datasets (FlyWire FAFB, Janelia MaleCNS) are not
+bundled and keep their own terms. Scientific sources and related community
+projects are credited in the
+[upstream README](https://github.com/Frankweb33/flybrain-robot-bridge#readme).

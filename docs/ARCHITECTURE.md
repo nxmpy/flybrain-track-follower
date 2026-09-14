@@ -42,3 +42,16 @@ from the configured robot IP and port. Each sender increments its sequence;
 non-increasing packets are ignored during one process session. Restart both
 endpoints together to reset sequence state. There is no handshake or session ID.
 Neither an IP check nor a sequence number provides authentication.
+
+## Track following
+
+Track backends (`optomotor-track`, `connectome-track`) replace VisionEncoder
+with PathRibbonEncoder and emit either `motor_command` or, with `--output track`:
+
+```json
+{"type":"track_command","sequence":42,"forward":14.2,"yaw_rate":-6.1,"lateral":-0.18,"confidence":0.94,"emergency_stop":false}
+```
+
+`forward` and `yaw_rate` are finite numbers in -100..100, `lateral` in -1..1,
+`confidence` in 0..1, and `emergency_stop` is a boolean. See
+[TRACK_FOLLOWING.md](TRACK_FOLLOWING.md).
