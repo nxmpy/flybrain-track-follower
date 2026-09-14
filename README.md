@@ -55,21 +55,41 @@ git clone https://github.com/nxmpy/flybrain-track-follower.git
 cd flybrain-track-follower
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python -m flybrain_robot.main --backend optomotor-track --synthetic-track --steps 1500
+flybrain-track sim
 ```
 
-This drives a simulated differential-drive robot along a random 8 m curvy track
-and prints a summary such as `rms_error_m=0.0145 completion=0.99 lost_frames=0`.
+A simulated robot drives a random 8 m curvy track and finishes with a plain result:
 
-```bash
-# other simulated courses
-python -m flybrain_robot.main --backend optomotor-track --synthetic-track --track-kind sine --steps 2000
-# a webcam or a recorded video of a line track (dry-run: nothing is sent)
-python -m flybrain_robot.main --backend optomotor-track --camera 0
-python -m flybrain_robot.main --backend optomotor-track --video line_track.mp4
-# black tape on a light floor
-printf 'track_polarity: dark\n' > config.yaml
+```text
+Result: followed the whole track - 99% of the course, typical error 14 mm, worst 28 mm.
 ```
+
+Add `--record sim.mp4` to save a preview video like this one:
+
+![Preview: detected path on the camera, brain stimulus, steering dial and wheel commands](assets/track-preview.png)
+
+## Set up a real robot or drone
+
+| step | command | what it does |
+|---|---|---|
+| 1 | `flybrain-track init --preset robot` (or `drone`) | writes a commented `config.yaml` |
+| 2 | `flybrain-track check --camera 0` | reads 60 frames, reports how well the path is seen, recommends `track_polarity`, flags an off-centre or jumpy path, saves `track-check.png` |
+| 3 | `flybrain-track run --camera 0 --record test.mp4` | follows the path in **dry-run** (nothing is sent) and records what it saw and decided |
+| 4 | edit `robot_ip` in `config.yaml`, lift the wheels or remove the propellers | |
+| 5 | `flybrain-track run --camera 0 --send` | sends commands; path lost or stale telemetry means stop |
+
+- `--show` opens a live preview window (press `q` to quit). This needs the GUI build: `pip install opencv-python`.
+- `--video clip.mp4` works anywhere `--camera` does, so you can tune settings on a recording.
+- Mistyped settings name the closest valid one, e.g. `Unknown setting in config.yaml: track_polarty (did you mean track_polarity?)`.
+
+The status line reads like this:
+
+```text
+frame    80 |  30.0 Hz | path right +0.40 | seen 100% | steer    right +0.32 | wheels L +20 R  +9
+```
+
+The lower-level `python -m flybrain_robot.main` command from the upstream bridge
+still accepts every option.
 
 ## How it follows
 
@@ -148,8 +168,8 @@ its own autopilot and hold position when `emergency_stop` is true. No MAVLink
 bridge is included; see [docs/TRACK_FOLLOWING.md](docs/TRACK_FOLLOWING.md#drones).
 
 ```bash
-cp config.example.yaml config.yaml   # set robot_ip/ports, backend: optomotor-track, output: track
-python -m flybrain_robot.main --camera 0 --config config.yaml --send
+flybrain-track init --preset drone    # output: track; then set robot_ip
+flybrain-track run --camera 0 --send
 ```
 
 ## Upstream bridge
@@ -170,7 +190,8 @@ and untested on hardware.
 ## Repository structure
 
 ```text
-src/flybrain_robot/track/            Path encoder, track brains, controller, simulator, metrics
+src/flybrain_robot/track_cli.py       flybrain-track command: init, check, sim, run
+src/flybrain_robot/track/            Path encoder, track brains, controller, simulator, preview, metrics
 src/flybrain_robot/track/connectome/ Connectome engine, retina and T4/T5 cursor from beedictor
 src/flybrain_robot/                  Upstream CLI, vision, protocol, decoder, configuration
 scripts/                             Open-loop follow test and grating direction test
@@ -204,6 +225,7 @@ controlled area with the autopilot's own failsafes enabled.
 ```bash
 ruff check .
 pytest -q                      # connectome test runs if ../bee/data/processed/*.npz exists
+flybrain-track sim --kind sine --record sim.mp4
 python scripts/open_loop_test.py
 pip install -e ".[demo]" && python examples/render_track_demo.py
 ```

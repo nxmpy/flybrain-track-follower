@@ -18,7 +18,7 @@ connectome = ["numba>=0.60"]
 
 [project.scripts]
 flybrain-robot = "flybrain_robot.main:main"
-flybrain-track = "flybrain_robot.main:main"
+flybrain-track = "flybrain_robot.track_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

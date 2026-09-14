@@ -15,6 +15,7 @@ flybrain-track-follower/
   assets/mock-demo.png
   assets/track-demo.gif
   assets/track-demo.png
+  assets/track-preview.png
   config.example.yaml
   docs/ARCHITECTURE.md
   docs/FILE_TREE.txt
@@ -52,9 +53,12 @@ flybrain-track-follower/
   src/flybrain_robot/track/connectome/retinotopy.py
   src/flybrain_robot/track/connectome/schema.py
   src/flybrain_robot/track/metrics.py
+  src/flybrain_robot/track/overlay.py
   src/flybrain_robot/track/ribbon.py
   src/flybrain_robot/track/sim.py
   src/flybrain_robot/track/steer.py
+  src/flybrain_robot/track_cli.py
   src/flybrain_robot/vision.py
   tests/test_core.py
   tests/test_track.py
+  tests/test_track_cli.py

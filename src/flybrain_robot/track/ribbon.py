@@ -104,6 +104,10 @@ class PathRibbonEncoder:
             centres[i] = (float((span * weight).sum() / weight.sum()) - half) / half
         return centres
 
+    def row_fractions(self):
+        """Vertical image position (0 top .. 1 bottom) of each sampled row."""
+        return np.linspace(1, 1 - self.roi, self.samples)
+
     def observe(self, centres):
         valid = np.flatnonzero(~np.isnan(centres))
         confidence = valid.size / centres.size

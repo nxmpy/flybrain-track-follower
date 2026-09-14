@@ -1,3 +1,4 @@
+import difflib
 import math
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -91,6 +92,14 @@ def load_config(path=None):
             raise ValueError(f"Config does not exist: {path}")
         return Config()
     data = yaml.safe_load(file.read_text()) or {}
-    if not isinstance(data, dict) or set(data) - {f.name for f in fields(Config)}:
-        raise ValueError("Unknown config fields or invalid mapping")
+    if not isinstance(data, dict):
+        raise ValueError(f"{file} must contain 'key: value' lines")
+    known = [f.name for f in fields(Config)]
+    unknown = sorted(set(data) - set(known))
+    if unknown:
+        hints = []
+        for name in unknown:
+            close = difflib.get_close_matches(name, known, n=1)
+            hints.append(f"{name} (did you mean {close[0]}?)" if close else name)
+        raise ValueError(f"Unknown setting in {file}: {', '.join(hints)}")
     return Config(**data)

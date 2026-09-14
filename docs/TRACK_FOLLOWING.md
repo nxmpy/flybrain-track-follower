@@ -116,8 +116,7 @@ python scripts/open_loop_test.py --backend connectome-track \
     --connectome ../bee/data/processed/male_connectome.npz --wiring random
 python scripts/grating_test.py ../bee/data/processed/male_connectome.npz
 printf 'track_kd: 0.0\n' > kd0.yaml
-python -m flybrain_robot.main --backend optomotor-track --synthetic-track \
-    --track-kind curvy --seed 2 --steps 2000 --config kd0.yaml
+flybrain-track sim --kind curvy --seed 2 --config kd0.yaml
 ```
 
 ## Connectome backend
@@ -163,8 +162,13 @@ at a fixed height so the path's width and look-ahead stay consistent.
 
 ## Tuning a real camera
 
+Work from recordings: `flybrain-track check --video clip.mp4` for detection, then
+`flybrain-track run --video clip.mp4 --record out.mp4` to see the detected path
+(green dots), the search region, the brain stimulus and the steering for every
+frame.
+
 - **`track_roi`:** use the image fraction that shows the ground just ahead, where the path is sharp.
 - **`track_polarity`:** `dark` for black tape on a light floor.
-- **`min_contrast` / `max_width`** (`PathRibbonEncoder`): raise `min_contrast` on noisy floors, and lower `max_width` if large bright areas get picked up as the path.
+- **`min_contrast` / `max_width`** (`PathRibbonEncoder` arguments, not yet config settings): raise `min_contrast` on noisy floors, and lower `max_width` if large bright areas get picked up as the path.
 - **`track_kp`, `track_turn_gain`, `track_base_speed`:** start slow, and raise `kp` until the vehicle oscillates, then back off.
 - **`dead_zone`:** the upstream default of 5 hides small corrections at low speed; 2 works better for line following.

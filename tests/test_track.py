@@ -167,7 +167,7 @@ def test_synthetic_track_cli_uses_no_camera_or_socket(monkeypatch, capsys):
     main_module.main(["--backend", "optomotor-track", "--synthetic-track", "--steps", "40",
                       "--output", "track"])
     output = capsys.readouterr().out
-    assert "error=" in output and "summary steps=40" in output
+    assert "error " in output and "summary steps=40" in output
 
 
 def test_track_output_needs_track_backend():

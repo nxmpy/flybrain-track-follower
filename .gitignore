@@ -7,3 +7,7 @@ config.yaml
 .env
 data/
 .DS_Store
+
+# flybrain-track outputs
+*.mp4
+track-check.png

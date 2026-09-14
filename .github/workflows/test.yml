@@ -20,4 +20,5 @@ jobs:
       - run: pytest -q
       - run: python -m flybrain_robot.main --backend mock --synthetic --dry-run --steps 20
       - run: python -m flybrain_robot.main --backend optomotor-track --synthetic-track --output track --steps 60
+      - run: flybrain-track sim --steps 60 --record sim.mp4
       - run: python scripts/open_loop_test.py --steps 150

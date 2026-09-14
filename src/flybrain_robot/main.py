@@ -39,10 +39,12 @@ def main(argv=None):
     parser.add_argument("--wiring", choices=["real", "shuffled", "random"])
     parser.add_argument("--config")
     parser.add_argument("--steps", type=int, default=300, help="Finite frame count (default: 300)")
+    parser.add_argument("--record", help="Track backends: write an annotated preview video (.mp4)")
+    parser.add_argument("--show", action="store_true", help="Track backends: live preview window")
     args = parser.parse_args(argv)
     if args.steps < 1:
         parser.error("--steps must be positive")
-    bridge, capture, decoder, sequence, output = None, None, None, 0, "differential"
+    bridge, capture, decoder, sequence, output, preview = None, None, None, 0, "differential", None
     try:
         cfg = load_config(args.config)
         logging.basicConfig(level=cfg.logging_level)
@@ -51,8 +53,11 @@ def main(argv=None):
         if args.wiring:
             cfg.track_wiring = args.wiring
         is_track = backend in TRACK_BACKENDS
-        if (args.synthetic_track or output == "track") and not is_track:
-            raise ValueError("--synthetic-track and track output need a track backend")
+        if (args.synthetic_track or output == "track" or args.record or args.show) and not is_track:
+            raise ValueError(
+                "--synthetic-track, --output track, --record and --show need a track backend: "
+                "add --backend optomotor-track (or use the flybrain-track command)"
+            )
         if is_track:
             from .track import build_track_brain
 
@@ -92,7 +97,16 @@ def main(argv=None):
             origin = video if video else (args.camera if args.camera is not None else cfg.camera)
             capture = cv2.VideoCapture(origin)
             if not capture.isOpened():
-                raise ValueError(f"Cannot open image source: {origin}")
+                hint = (
+                    "check the file path"
+                    if video
+                    else "check it is connected, not used by another program, or try --camera 1"
+                )
+                raise ValueError(f"Cannot open image source {origin!r}: {hint}")
+        if args.record or args.show:
+            from .track.overlay import Preview
+
+            preview = Preview(args.record, args.show)
         if args.send:
             bridge = UDPBridge(cfg)
         print(
@@ -150,19 +164,8 @@ def main(argv=None):
                     "fresh" if bridge and bridge.fresh() else ("stale" if bridge else "synthetic")
                 )
                 if is_track:
-                    obs, steer = encoder.observation, brain.controller.command
-                    extra = (
-                        f" error={trace.true_lateral[-1] * 1000:+.0f}mm "
-                        f"progress={world.progress:.0%}"
-                        if world is not None
-                        else ""
-                    )
-                    print(
-                        f"frame={index:04d} Hz={1 / dt:.1f} path={obs.lateral:+.2f} "
-                        f"brain={brain.estimate.lateral:+.2f} confidence={obs.confidence:.2f} "
-                        f"turn={steer.turn:+.2f} command={left:+d}/{right:+d} "
-                        f"{'LOST' if lost else ''}{extra} watchdog={'STOP' if stopped else 'ready'}"
-                    )
+                    print(track_status(index, dt, encoder, brain, left, right, lost, stopped,
+                                       world, trace))
                 else:
                     print(
                         f"frame={index:04d} Hz={1 / dt:.1f} motion={sensory.left_motion:.2f}/"
@@ -170,6 +173,10 @@ def main(argv=None):
                         f"motor={activity.left:.2f}/{activity.right:.2f} "
                         f"command={left:+d}/{right:+d} watchdog={'STOP' if stopped else 'ready'}"
                     )
+            if preview is not None and not preview(
+                render_preview(frame, encoder, brain, left, right, lost)
+            ):
+                break
             if world is not None:
                 if world.progress >= 0.99:
                     break
@@ -182,11 +189,27 @@ def main(argv=None):
             print("summary " + " ".join(
                 f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in summary.items()
             ))
+            if "rms_error_m" in summary:
+                if summary["completion"] >= 0.95:
+                    verdict = "followed the whole track"
+                elif summary["lost_frames"]:
+                    verdict = "lost the path"
+                else:
+                    verdict = "still on track when --steps ran out"
+                print(
+                    f"Result: {verdict} - {summary['completion']:.0%} of the course, "
+                    f"typical error {summary['rms_error_m'] * 1000:.0f} mm, "
+                    f"worst {summary['max_error_m'] * 1000:.0f} mm."
+                )
+        if args.record:
+            print(f"Preview video written to {args.record}")
     except KeyboardInterrupt:
         print("Stopped by user.")
     except (ValueError, OSError, NotImplementedError, cv2.error, yaml.YAMLError) as exc:
         parser.exit(2, f"Error: {exc}\n")
     finally:
+        if preview is not None:
+            preview.close()
         if decoder:
             decoder.stop()
         if bridge:
@@ -203,6 +226,34 @@ def main(argv=None):
                 bridge.close()
         if capture:
             capture.release()
+
+
+def render_preview(frame, encoder, brain, left, right, lost):
+    from .track.overlay import render
+
+    return render(frame, encoder, brain, left, right, lost)
+
+
+def track_status(index, dt, encoder, brain, left, right, lost, stopped, world, trace):
+    obs, steer = encoder.observation, brain.controller.command
+    side = "right" if obs.lateral > 0.05 else ("left" if obs.lateral < -0.05 else "ahead")
+    turn = "right" if steer.turn > 0.05 else ("left" if steer.turn < -0.05 else "straight")
+    parts = [
+        f"frame {index:5d}",
+        f"{1 / dt:5.1f} Hz",
+        f"path {side:>5} {obs.lateral:+.2f}",
+        f"seen {obs.confidence:4.0%}",
+        f"steer {turn:>8} {steer.turn:+.2f}",
+        f"wheels L{left:+4d} R{right:+4d}",
+    ]
+    if world is not None:
+        parts.append(f"error {trace.true_lateral[-1] * 1000:+4.0f} mm")
+        parts.append(f"course {world.progress:4.0%}")
+    if lost:
+        parts.append("PATH LOST - stopped")
+    elif stopped:
+        parts.append("STOP (no fresh telemetry)")
+    return " | ".join(parts)
 
 
 if __name__ == "__main__":
